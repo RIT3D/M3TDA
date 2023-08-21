@@ -1,8 +1,10 @@
+### How To Run
+To conduct experiments under multiple target domains, go to `MTDA/mtda` and run
+```
+python run_mtda.py --exp <ID>
+```
+
 # MIC for Domain-Adaptive Semantic Segmentation
-
-
-## MTDA_SEG
-
 
 ## Environment Setup
 
