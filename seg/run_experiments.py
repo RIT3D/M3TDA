@@ -10,7 +10,7 @@
 import argparse
 import logging
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import subprocess
 import uuid
 from datetime import datetime
@@ -19,7 +19,7 @@ import torch
 from experiments import generate_experiment_cfgs
 from mmcv import Config, get_git_hash
 from tools import train
-
+import pdb
 
 def run_command(command):
     p = subprocess.Popen(
@@ -59,7 +59,6 @@ if __name__ == '__main__':
     GEN_CONFIG_DIR = 'configs/generated/'
     JOB_DIR = 'jobs'
     cfgs, config_files = [], []
-
     # Training with Predefined Config
     if args.config is not None:
         cfg = Config.fromfile(args.config)

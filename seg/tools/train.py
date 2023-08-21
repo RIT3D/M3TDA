@@ -23,6 +23,7 @@ from mmseg.datasets import build_dataset
 from mmseg.models.builder import build_train_model
 from mmseg.utils import collect_env, get_root_logger
 from mmseg.utils.collect_env import gen_code_archive
+import pdb
 
 
 def parse_args(args):
@@ -142,7 +143,7 @@ def main(args):
     cfg.seed = args.seed
     meta['seed'] = args.seed
     meta['exp_name'] = osp.splitext(osp.basename(args.config))[0]
-
+    pdb.set_trace()
     model = build_train_model(
         cfg, train_cfg=cfg.get('train_cfg'), test_cfg=cfg.get('test_cfg'))
     model.init_weights()
