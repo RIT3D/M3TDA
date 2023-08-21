@@ -17,6 +17,8 @@ The `build_train_model` function is defined in `mtda_seg/mmseg/models/buidler.py
 
 For the datasets, all the datasets (GTA5, Cityscapes, IDD, Synthia) are integrated into one dataset object `MTDADataset` defined in `mtda_seg/mmseg/datasets/mtda_dataset.py`. The object `MTDADataset` shows how to load/read and pre-process all the src/trg data within the internal function `self.__getitem__(self, idx)`.
 
+Our goal is to train one source domain and two target domains. So we have to modify the data loading process and how they are sent into the model for training. To achieve this, we have to modify on the decorator `mtda_seg/mmseg/models/uda/uda_decorator.py` and the model files under `mtda_seg/mmseg/models/uda/`.
+
 # MIC for Domain-Adaptive Semantic Segmentation
 
 ## Environment Setup
