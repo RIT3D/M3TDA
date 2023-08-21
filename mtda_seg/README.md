@@ -1,8 +1,21 @@
-### How To Run
-To conduct experiments under multiple target domains, go to `MTDA/mtda` and run
+## How To Run
+To conduct experiments under multiple target domains, under `MTDA/mtda` and you can run
 ```
 python run_mtda.py --exp <ID>
 ```
+
+## Code structures 
+To understand deeply the structures of mmseg, we need to first look at the the code structures, especially in where to build models and datasets and where to do training and optimization.
+
+The models and all necessary datasets are built in `mtda_seg/tools/train.py`, specifically in
+```
+model = build_train_model(
+    cfg, train_cfg=cfg.get('train_cfg'), test_cfg=cfg.get('test_cfg'))
+datasets = [build_dataset(cfg.data.train)]
+```
+The `build_train_model` function is defined in `mtda_seg/mmseg/models/buidler.py` and will call one of the models registered under `mtda_seg/mmseg/models/uda/`. These registered models can be found at `mtda_seg/mmseg/models/__init__.py`.
+
+For the datasets, all the datasets (GTA5, Cityscapes, IDD, Synthia) are integrated into one dataset object `MTDADataset` defined in `mtda_seg/mmseg/datasets/mtda_dataset.py`. The object `MTDADataset` shows how to load/read and pre-process all the src/trg data within the internal function `self.__getitem__(self, idx)`.
 
 # MIC for Domain-Adaptive Semantic Segmentation
 
