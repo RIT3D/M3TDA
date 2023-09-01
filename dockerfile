@@ -15,13 +15,13 @@ RUN rm /etc/apt/sources.list.d/cuda.list
 RUN rm /etc/apt/sources.list.d/nvidia-ml.list
 RUN apt-get update
 RUN apt-get install -y libglib2.0-0 libgl1-mesa-dev
+
 # Segmentation
 RUN pip install -r /backup/requirements.txt
 RUN pip install mmcv-full==1.3.7
-# Detection
-# ?
+
+# # Detection
+
 # # Classfication
 # RUN pip -r /workspace/MTDA/cls/requirements.txt
-
-# Configuration
 

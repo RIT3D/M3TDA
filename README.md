@@ -1,10 +1,9 @@
-# MIC: Masked Image Consistency for Context-Enhanced Domain Adaptation
+# M3TDA: Mix Mask Multi-Target Domain Adaptation for Autonoumous Driving
 
-**by
-[Lukas Hoyer](https://lhoyer.github.io/),
-[Dengxin Dai](https://vas.mpi-inf.mpg.de/dengxin/),
-[Haoran Wang](https://krumo.github.io/), and
-[Luc Van Gool](https://scholar.google.de/citations?user=TwMib_QAAAAJ&hl=en)**
+by
+*[Fei Pan](https://lhoyer.github.io/),
+*[Dong He](https://vas.mpi-inf.mpg.de/dengxin/),
+
 
 **[[Arxiv]](https://arxiv.org/abs/2212.01322)**
 **[[Paper]](https://arxiv.org/pdf/2212.01322)**
