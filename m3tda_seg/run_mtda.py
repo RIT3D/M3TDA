@@ -10,7 +10,7 @@
 import argparse
 import logging
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import subprocess
 import uuid
 from datetime import datetime
@@ -19,7 +19,6 @@ import torch
 from experiments import generate_experiment_cfgs
 from mmcv import Config, get_git_hash
 from tools import train
-import pdb
 
 def run_command(command):
     p = subprocess.Popen(
@@ -124,7 +123,6 @@ if __name__ == '__main__':
             config_files.append(cfg_out_file)
 
     if args.machine == 'local':
-        pdb.set_trace()
         for i, cfg in enumerate(cfgs):
             # for each baseline, only run 1 time (seed=0)
             if args.startup_test and cfg['seed'] != 0:

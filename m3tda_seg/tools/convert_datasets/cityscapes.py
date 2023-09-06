@@ -19,7 +19,7 @@ import pdb
 
 
 def convert_json_to_label(json_file):
-    pdb.set_trace()
+    # pdb.set_trace()
     label_file = json_file.replace('_polygons.json', '_labelTrainIds.png')
     json2labelImg(json_file, label_file, 'trainIds')
 
@@ -73,7 +73,7 @@ def save_class_stats(out_dir, sample_class_stats):
 
 
 def main():
-    pdb.set_trace()
+    # pdb.set_trace()
     args = parse_args()
     cityscapes_path = args.cityscapes_path
     out_dir = args.out_dir if args.out_dir else cityscapes_path

@@ -16,7 +16,7 @@ docker build -t donghe/ubuntu_mmdet_${1} .
 #         --ipc=host \
 #         donghe/ubuntu_mmdet_${1}
 
-#Server
+#server | desktop_4090ti
 docker run -it \
         --gpus all \
         -v /tmp/.X11-unix:/tmp/.X11-unix \

@@ -366,12 +366,12 @@ def generate_experiment_cfgs(id):
     # Set some defaults
     # -------------------------------------------------------------------------
     cfgs = []
-    n_gpus = 2
-    batch_size = 4
+    n_gpus = 1
+    batch_size = 8
     iters = 40000
     opt, lr, schedule, pmult = 'adamw', 0.00006, 'poly10warm', True
     crop = '512x512'
-    gpu_model = 'NVIDIAA100'
+    gpu_model = 'NVIDIARTX4090'
     datasets = [
         ('gta', 'cityscapes'),
     ]

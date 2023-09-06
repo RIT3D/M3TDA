@@ -3,7 +3,6 @@ import random
 from loguru import logger
 import numpy as np
 from skimage import io, transform
-import time
 
 
 def random_sample(target_dataset_paths):
@@ -22,33 +21,23 @@ def random_sample(target_dataset_paths):
     return selected_imgs
 
 def zebra_patch(imgs):
-    image_a = io.imread(imgs[0])
-    image_b = io.imread(imgs[1])
+    # paste zebra(vertical) patch on image  
+    image_back = io.imread(imgs[0])
+    image_patch = io.imread(imgs[1])
 
-    # 获取图片a的高度和宽度
-    height_a, width_a = image_a.shape[:2]
+    # resize first
+    image_patch_resized = transform.resize(image_patch, (image_back.shape[0], image_back.shape[1]))*255
+    width_patch = image_patch.shape[1]
 
-    # 使用时间戳作为随机数种子，确保每次运行生成不同的随机数
-    random_seed = int(time.time())
-    random.seed(random_seed)
-
-    crop_start = random.randint(0, width_a - 1)
-    crop_end = random.randint(crop_start + 1, width_a)
-
-
-    crop_width = crop_end - crop_start
-
-    cropped_region = image_a[:, crop_start:crop_end, :]
-    cropped_region_resized = transform.resize(cropped_region, (image_b.shape[0], crop_width))
-
-
-    if cropped_region_resized.shape[1] != crop_width:
-        cropped_region_resized = cropped_region_resized[:, :crop_width, :]
-
-    image_c = np.copy(image_b)
-    image_c[:, crop_start:crop_end, :] = cropped_region_resized
-
-    io.imsave('image_c_path.jpg', image_c)
+    # crop image as patch；leave margin on both sides
+    crop_start = random.randint(int(width_patch* 0.2), int(width_patch* 0.8))
+    crop_end = random.randint(int(crop_start + 5), int(width_patch*0.95))
+    cropped_region = image_patch_resized[:, crop_start:crop_end, :]
+  
+    # paste patch on image
+    image_zebra = np.copy(image_back)
+    image_zebra[:, crop_start:crop_end, :] = cropped_region
+    io.imsave('image_zebra.jpg', image_zebra)
 
 def main():
     target_dataset_paths = ['./cityscapes','./gta', './Mapillary']

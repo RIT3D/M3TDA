@@ -118,9 +118,9 @@ DAFormer
 train IDs and to generate the class index for RCS:
 
 ```shell
-python tools/convert_datasets/gta.py data/gta --nproc 8
-python tools/convert_datasets/cityscapes.py data/cityscapes --nproc 8
-python tools/convert_datasets/synthia.py data/synthia/ --nproc 8
+python tools/convert_datasets/gta.py data/gta --nproc 16
+python tools/convert_datasets/cityscapes.py data/cityscapes --nproc 16
+python tools/convert_datasets/synthia.py data/synthia/ --nproc 16
 ```
 
 ## Training
