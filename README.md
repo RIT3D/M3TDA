@@ -1,8 +1,8 @@
 # M3TDA: Mix Mask Multi-Target Domain Adaptation for Autonoumous Driving
 
 by
-*[Fei Pan](https://lhoyer.github.io/),
-*[Dong He](https://vas.mpi-inf.mpg.de/dengxin/),
+*[Fei Pan](https://github.com/orgs/RIT3D/people/feipanir),
+*[Dong He](https://github.com/orgs/RIT3D/people/hadonga),
 
 
 **[[Arxiv]](https://arxiv.org/abs/2212.01322)**
