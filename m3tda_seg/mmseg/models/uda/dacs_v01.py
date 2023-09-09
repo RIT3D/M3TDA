@@ -262,81 +262,6 @@ class DACS(UDADecorator):
         if self.mic is not None:
             self.mic.debug = debug
 
-    def predict_pseudo_label_and_weight(self, 
-                                        target_img, target_img_metas, 
-                                        valid_pseudo_mask):   
-        ema_logits = self.get_ema_model().generate_pseudo_label(
-            target_img, target_img_metas)
-        debug_output = self.get_ema_model().debug_output
-        pseudo_label, pseudo_weight = self.get_pseudo_label_and_weight(
-            ema_logits)
-        pseudo_weight = self.filter_valid_pseudo_region(
-            pseudo_weight, valid_pseudo_mask)
-        
-        del ema_logits
-        return pseudo_label, pseudo_weight, debug_output
-    
-    def mix_source_target(self, 
-                          img, img_metas, 
-                          gt_semantic_seg, gt_pixel_weight,
-                          trg_img, 
-                          pseudo_label, pseudo_weight,
-                          strong_parameters,
-                          seg_debug_mode):
-        
-        batch_size = img.shape[0]
-        mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
-        mixed_seg_weight = pseudo_weight.clone()
-        mix_masks = get_class_masks(gt_semantic_seg)
-
-        for i in range(batch_size):
-            strong_parameters['mix'] = mix_masks[i]
-            strong_parameters['mix'] = mix_masks[i]
-            mixed_img[i], mixed_lbl[i] = strong_transform(
-                strong_parameters,
-                data=torch.stack((img[i], trg_img[i])),
-                target=torch.stack(
-                    (gt_semantic_seg[i][0], pseudo_label[i])))
-            _, mixed_seg_weight[i] = strong_transform(
-                strong_parameters,
-                target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])))
-        del gt_pixel_weight
-
-        mixed_img = torch.cat(mixed_img)
-        mixed_lbl = torch.cat(mixed_lbl)
-        mix_losses = self.get_model().forward_train(
-            mixed_img,
-            img_metas,
-            mixed_lbl,
-            seg_weight=mixed_seg_weight,
-            return_feat=False,
-        )
-        debug_output = self.get_model().debug_output
-
-        if seg_debug_mode:
-            return mix_losses, debug_output, \
-                (mixed_img.detach(), mixed_lbl.detach(), mix_masks, mixed_seg_weight)
-        else:
-            return mix_losses, debug_output, \
-                (None, None, None, None)
-    
-    def mask_training(self,
-                      img, img_metas,
-                      gt_semantic_seg,
-                      trg_img, trg_img_metas,
-                      valid_pseudo_mask,
-                      pseudo_label, pseudo_weight):
-        
-        masked_loss = self.mic(self.get_model(), img, img_metas,
-                               gt_semantic_seg, trg_img,
-                               trg_img_metas, valid_pseudo_mask,
-                               pseudo_label, pseudo_weight
-        )
-        
-        mic_debug_output = self.mic.debug_output
-        
-        return masked_loss, mic_debug_output
-
     def get_pseudo_label_and_weight(self, logits):
         ema_softmax = torch.softmax(logits.detach(), dim=1)
         pseudo_prob, pseudo_label = torch.max(ema_softmax, dim=1)
@@ -360,8 +285,6 @@ class DACS(UDADecorator):
         if valid_pseudo_mask is not None:
             pseudo_weight *= valid_pseudo_mask.squeeze(1)
         return pseudo_weight
-    
-
 
     def forward_train(self,
                       img,
@@ -405,8 +328,6 @@ class DACS(UDADecorator):
             self.mic.update_weights(self.get_model(), self.local_iter)
 
         self.update_debug_state()
-        seg_debug_mode = (self.local_iter % self.debug_img_interval == 0 and \
-            not self.source_only)
         seg_debug = {}
 
         means, stds = get_mean_std(img_metas, dev)
@@ -420,7 +341,7 @@ class DACS(UDADecorator):
             'std': stds[0].unsqueeze(0)
         }
 
-        # Train on Source Images
+        # Train on source images
         clean_losses = self.get_model().forward_train(
             img, img_metas, gt_semantic_seg, return_feat=True)
         src_feat = clean_losses.pop('features')
@@ -455,173 +376,89 @@ class DACS(UDADecorator):
             del feat_loss
 
         pseudo_label, pseudo_weight = None, None
-        pseudo2_label, pseudo2_weight = None, None
-        # Train on Target Images
         if not self.source_only:
-            for m in self.get_ema_model().modules():
-                if isinstance(m, _DropoutNd):
-                    m.training = False
-                if isinstance(m, DropPath):
-                    m.training = False
-            # Get target1 pseudo label
-            pseudo_label, pseudo_weight, debug_output = self.predict_pseudo_label_and_weight(
-                target_img, target_img_metas, 
-                valid_pseudo_mask
-            )
-            # Debug target1 seg. output
-            seg_debug['Target1'] = debug_output
+            for trg_idx, trg_img, trg_img_metas in zip(
+                                            (0,1),
+                                            (target_img, target2_img,),
+                                            (target_img_metas, target2_img_metas)):
+                # Generate pseudo-label
+                for m in self.get_ema_model().modules():
+                    if isinstance(m, _DropoutNd):
+                        m.training = False
+                    if isinstance(m, DropPath):
+                        m.training = False
+                ema_logits = self.get_ema_model().generate_pseudo_label(
+                    trg_img, trg_img_metas)
+                seg_debug['Target'] = self.get_ema_model().debug_output
 
-            # Get target2 pseudo label
-            pseudo2_label, pseudo2_weight, debug_output = self.predict_pseudo_label_and_weight(
-                target2_img, target2_img_metas, 
-                valid_pseudo_mask
-            )
-            # Debug target2 seg. output
-            seg_debug['Target2'] = debug_output
-            
-            gt_pixel_weight = torch.ones((pseudo_weight.shape), device=dev)
+                pseudo_label, pseudo_weight = self.get_pseudo_label_and_weight(
+                    ema_logits)
+                del ema_logits
 
-            # Train on the mixed target 1 and source (MixS1) image
-            mixs1_losses, debug_output, mixs1_debug_content = self.mix_source_target(
-                img, img_metas,
-                gt_semantic_seg, gt_pixel_weight,
-                target_img,
-                pseudo_label, pseudo_weight,
-                strong_parameters,
-                seg_debug_mode,
-            )
-            # Debug the mixed (MixS1) image 
-            seg_debug['MixS1'] = debug_output
-            mixs1_losses = add_prefix(mixs1_losses, 'mixs1')
-            mixs1_loss, mixs1_log_vars = self._parse_losses(mixs1_losses)
-            log_vars.update(mixs1_log_vars)
-            mixs1_loss.backward(retain_graph=True)
+                pseudo_weight = self.filter_valid_pseudo_region(
+                    pseudo_weight, valid_pseudo_mask)
+                gt_pixel_weight = torch.ones((pseudo_weight.shape), device=dev)
 
-            # Train on the mixed target 2 and source (MixS2) image
-            mixs2_losses, debug_output, mixs2_debug_content = self.mix_source_target(
-                img, img_metas,
-                gt_semantic_seg, gt_pixel_weight,
-                target2_img,
-                pseudo2_label, pseudo2_weight,
-                strong_parameters,
-                seg_debug_mode,
-            )
-            # Debug the mixed (MixS2) image
-            seg_debug['MixS2'] = debug_output
-            mixs2_losses = add_prefix(mixs1_losses, 'mixs2')
-            mixs2_loss, mixs2_log_vars = self._parse_losses(mixs2_losses)
-            log_vars.update(mixs2_log_vars)
-            mixs2_loss.backward()
-            
-            if self.enable_masking and self.mask_mode.startswith('separate'):
-                # Train on the masked image (here only mask on target1 image - Masked1)
-                maskeds1_loss, mic_debug_output = self.mask_training(
-                    img, img_metas,
-                    gt_semantic_seg,
-                    target_img, target_img_metas,
-                    valid_pseudo_mask,
-                    pseudo_label, pseudo_weight
+                # Apply mixing
+                mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
+                mixed_seg_weight = pseudo_weight.clone()
+                mix_masks = get_class_masks(gt_semantic_seg)
+
+                for i in range(batch_size):
+                    strong_parameters['mix'] = mix_masks[i]
+                    mixed_img[i], mixed_lbl[i] = strong_transform(
+                        strong_parameters,
+                        data=torch.stack((img[i], trg_img[i])),
+                        target=torch.stack(
+                            (gt_semantic_seg[i][0], pseudo_label[i])))
+                    _, mixed_seg_weight[i] = strong_transform(
+                        strong_parameters,
+                        target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])))
+                del gt_pixel_weight
+                mixed_img = torch.cat(mixed_img)
+                mixed_lbl = torch.cat(mixed_lbl)
+
+                # Train on mixed images
+                mix_losses = self.get_model().forward_train(
+                    mixed_img,
+                    img_metas,
+                    mixed_lbl,
+                    seg_weight=mixed_seg_weight,
+                    return_feat=False,
                 )
-                # Masked1 debug & log record
-                # pdb.set_trace()
-                # mic_debug_output['Masked1'] = mic_debug_output.pop('Masked')
-                # seg_debug.update(mic_debug_output)
-                if seg_debug_mode:
-                    seg_debug['Masked1'] = mic_debug_output['Masked']
-                maskeds1_loss = add_prefix(maskeds1_loss, 'masked1')
-                maskeds1_loss, masked1_log_vars = self._parse_losses(maskeds1_loss)
-                log_vars.update(masked1_log_vars)
-                maskeds1_loss.backward()
-                # Train on the masked image (here only mask on target2 image - Masked2)
-                maskeds2_loss, mic_debug_output = self.mask_training(
-                    img, img_metas,
-                    gt_semantic_seg,
-                    target2_img, target2_img_metas,
-                    valid_pseudo_mask,
-                    pseudo2_label, pseudo2_weight,
-                )
-                # Masked2 debug & log record
-                # mic_debug_output['MaskedS2'] = mic_debug_output.pop('Masked')
-                # seg_debug.update(mic_debug_output)
-                if seg_debug_mode:
-                    seg_debug['Masked2'] = mic_debug_output['Masked']
-                maskeds2_loss = add_prefix(maskeds2_loss, 'maskeds2')
-                maskeds2_loss, masked2_log_vars = self._parse_losses(maskeds2_loss)
-                log_vars.update(masked2_log_vars)
-                maskeds2_loss.backward()
+                # Calculate the mixed image loss
+                seg_debug['Mix'] = self.get_model().debug_output
+                mix_losses = add_prefix(mix_losses, 'mix')
+                mix_loss, mix_log_vars = self._parse_losses(mix_losses)
+                log_vars.update(mix_log_vars)
+                # Update the network
+                mix_loss.backward()
 
-            if seg_debug_mode:
-                out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
-                os.makedirs(out_dir, exist_ok=True)
-                vis_img = torch.clamp(denorm(img, means, stds), 0, 1)
-                vis_trg1_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
-                vis_trg2_img = torch.clamp(denorm(target2_img, means, stds), 0, 1)
-                vis_mixs1_img = torch.clamp(denorm(mixs1_debug_content[0], means, stds), 0, 1)
-                vis_mixs2_img = torch.clamp(denorm(mixs2_debug_content[0], means, stds), 0, 1)
-                for j in range(batch_size):
-                    rows, cols = 4, 4
-                    fig, axs = plt.subplots(
-                        rows, 
-                        cols,
-                        figsize=(3*cols, 3*rows),
-                        gridspec_kw={
-                            'hspace': 0.1,
-                            'wspace': 0,
-                            'top': 0.95,
-                            'bottom': 0,
-                            'right': 1,
-                            'left': 0        
-                        },
-                    )
-                    subplotimg(axs[0][0], vis_img[j], 'source Image')
-                    subplotimg(axs[1][0], vis_trg1_img[j], 'Target1 Image')
-                    subplotimg(axs[2][0], vis_trg2_img[j], 'Target2 Image')
-                    subplotimg(axs[0][1], gt_semantic_seg[j],
-                              'Source Seg GT',cmap='cityscapes')
-                    subplotimg(axs[1][1], pseudo_label[j],
-                               'Target1 Seg (Pseudo) GT', cmap='cityscapes')
-                    subplotimg(axs[2][1], pseudo2_label[j],
-                               'Target2 Seg (Pseudo) GT', cmap='cityscapes')
-                    # MixS1
-                    subplotimg(axs[0][2], vis_mixs1_img[j], 
-                               'MixS1 Image')
-                    subplotimg(axs[1][2], mixs1_debug_content[2][j][0], 
-                               'Domain Mask (MixS1)', cmap='gray')
-                    subplotimg(axs[0][3], mixs1_debug_content[3][j],
-                               'Pseudo W. (MixS1)', vmin=0, vmax=1)
-                    if mixs1_debug_content[1] is not None:
-                        subplotimg(axs[1][3], mixs1_debug_content[1][j], 
-                                   'MixS1 Label', cmap='cityscapes')
-                    # MixS2
-                    subplotimg(axs[2][2], vis_mixs2_img[j], 
-                               'MixS2 Image')
-                    subplotimg(axs[3][2], mixs2_debug_content[2][j][0], 
-                               'Domain Mask (MixS2)', cmap='gray')
-                    subplotimg(axs[2][3], mixs2_debug_content[3][j],
-                               'Pseudo W. (MixS2)', vmin=0, vmax=1)
-                    if mixs2_debug_content[1] is not None:
-                        subplotimg(axs[3][3], mixs2_debug_content[1][j], 
-                                   'MixS2 Label', cmap='cityscapes')
-                    for ax in axs.flat:
-                            ax.axis('off')
-                    plt.savefig(os.path.join(out_dir,
-                                f'{(self.local_iter + 1):06d}_{j}.png'))
-                    plt.close()
+                # Masked Training
+                if self.enable_masking and self.mask_mode.startswith('separate'):
+                    masked_loss = self.mic(self.get_model(), img, img_metas,
+                                        gt_semantic_seg, trg_img,
+                                        trg_img_metas, valid_pseudo_mask,
+                                        pseudo_label, pseudo_weight)
+                    seg_debug.update(self.mic.debug_output)
+                    masked_loss = add_prefix(masked_loss, 'masked')
+                    masked_loss, masked_log_vars = self._parse_losses(masked_loss)
+                    log_vars.update(masked_log_vars)
+                    masked_loss.backward()
 
-                out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
-                os.makedirs(out_dir, exist_ok=True)
-                if seg_debug['Source'] is not None and seg_debug:
-                    if 'Target1' in seg_debug:
-                        seg_debug['Target1']['Pseudo W.'] = mixs1_debug_content[3].cpu().numpy()
-                    if 'Target2' in seg_debug:
-                        seg_debug['Target2']['Pseudo W.'] = mixs2_debug_content[3].cpu().numpy()
+                if self.local_iter % self.debug_img_interval == 0 and \
+                        not self.source_only:
+                    out_dir = os.path.join(self.train_cfg['work_dir'], 'debug_{}'.format(trg_idx))
+                    os.makedirs(out_dir, exist_ok=True)
+                    vis_img = torch.clamp(denorm(img, means, stds), 0, 1)
+                    vis_trg_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
+                    vis_mixed_img = torch.clamp(denorm(mixed_img, means, stds), 0, 1)
                     for j in range(batch_size):
-                        cols = len(seg_debug)
-                        rows = max(len(seg_debug[k]) for k in seg_debug.keys())
+                        rows, cols = 2, 5
                         fig, axs = plt.subplots(
                             rows,
                             cols,
-                            figsize=(5 * cols, 5 * rows),
+                            figsize=(3 * cols, 3 * rows),
                             gridspec_kw={
                                 'hspace': 0.1,
                                 'wspace': 0,
@@ -630,20 +467,89 @@ class DACS(UDADecorator):
                                 'right': 1,
                                 'left': 0
                             },
-                            squeeze=False,
                         )
-                        for k1, (n1, outs) in enumerate(seg_debug.items()):
-                            for k2, (n2, out) in enumerate(outs.items()):
-                                subplotimg(
-                                    axs[k2][k1],
-                                    **prepare_debug_out(f'{n1} {n2}', out[j],
-                                                        means, stds))
+                        subplotimg(axs[0][0], vis_img[j], 'Source Image')
+                        subplotimg(axs[1][0], vis_trg_img[j], 'Target Image')
+                        subplotimg(
+                            axs[0][1],
+                            gt_semantic_seg[j],
+                            'Source Seg GT',
+                            cmap='cityscapes')
+                        subplotimg(
+                            axs[1][1],
+                            pseudo_label[j],
+                            'Target Seg (Pseudo) GT',
+                            cmap='cityscapes')
+                        subplotimg(axs[0][2], vis_mixed_img[j], 'Mixed Image')
+                        subplotimg(
+                            axs[1][2], mix_masks[j][0], 'Domain Mask', cmap='gray')
+                        # subplotimg(axs[0][3], pred_u_s[j], "Seg Pred",
+                        #            cmap="cityscapes")
+                        if mixed_lbl is not None:
+                            subplotimg(
+                                axs[1][3], mixed_lbl[j], 'Seg Targ', cmap='cityscapes')
+                        subplotimg(
+                            axs[0][3],
+                            mixed_seg_weight[j],
+                            'Pseudo W.',
+                            vmin=0,
+                            vmax=1)
+                        if self.debug_fdist_mask is not None:
+                            subplotimg(
+                                axs[0][4],
+                                self.debug_fdist_mask[j][0],
+                                'FDist Mask',
+                                cmap='gray')
+                        if self.debug_gt_rescale is not None:
+                            subplotimg(
+                                axs[1][4],
+                                self.debug_gt_rescale[j],
+                                'Scaled GT',
+                                cmap='cityscapes')
                         for ax in axs.flat:
                             ax.axis('off')
                         plt.savefig(
                             os.path.join(out_dir,
-                                        f'{(self.local_iter + 1):06d}_{j}_s.png'))
+                                        f'{(self.local_iter + 1):06d}_{j}.png'))
                         plt.close()
+
+                if self.local_iter % self.debug_img_interval == 0:
+                    pdb.set_trace()
+                    out_dir = os.path.join(self.train_cfg['work_dir'], 'debug_{}'.format(trg_idx))
+                    os.makedirs(out_dir, exist_ok=True)
+                    if seg_debug['Source'] is not None and seg_debug:
+                        if 'Target' in seg_debug:
+                            seg_debug['Target']['Pseudo W.'] = mixed_seg_weight.cpu(
+                            ).numpy()
+                        for j in range(batch_size):
+                            cols = len(seg_debug)
+                            rows = max(len(seg_debug[k]) for k in seg_debug.keys())
+                            fig, axs = plt.subplots(
+                                rows,
+                                cols,
+                                figsize=(5 * cols, 5 * rows),
+                                gridspec_kw={
+                                    'hspace': 0.1,
+                                    'wspace': 0,
+                                    'top': 0.95,
+                                    'bottom': 0,
+                                    'right': 1,
+                                    'left': 0
+                                },
+                                squeeze=False,
+                            )
+                            for k1, (n1, outs) in enumerate(seg_debug.items()):
+                                for k2, (n2, out) in enumerate(outs.items()):
+                                    subplotimg(
+                                        axs[k2][k1],
+                                        **prepare_debug_out(f'{n1} {n2}', out[j],
+                                                            means, stds))
+                            for ax in axs.flat:
+                                ax.axis('off')
+                            plt.savefig(
+                                os.path.join(out_dir,
+                                            f'{(self.local_iter + 1):06d}_{j}_s.png'))
+                            plt.close()
             del seg_debug
         self.local_iter += 1
         return log_vars

@@ -124,7 +124,6 @@ if __name__ == '__main__':
             config_files.append(cfg_out_file)
 
     if args.machine == 'local':
-        pdb.set_trace()
         for i, cfg in enumerate(cfgs):
             # for each baseline, only run 1 time (seed=0)
             if args.startup_test and cfg['seed'] != 0:

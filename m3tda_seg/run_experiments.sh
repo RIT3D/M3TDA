@@ -1,3 +1,3 @@
 #!/bin/bash
 rm -rf ./configs/generated/* ./work_dirs/* 
-python run_mtda.py --exp 81
+CUDA_VISIBLE_DEVICES=0 python run_mtda.py --exp 81
