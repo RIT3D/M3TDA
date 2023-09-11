@@ -3,10 +3,14 @@
 # A copy of the license is available at resources/license_dacs
 
 import kornia
+import random
 import numpy as np
 import torch
 import torch.nn as nn
+import time
 
+random_seed = int(time.time())
+random.seed(random_seed)
 
 def strong_transform(param, data=None, target=None):
     assert ((data is not None) or (target is not None))
@@ -98,13 +102,58 @@ def get_class_masks(labels):
         class_masks.append(generate_class_mask(label, classes).unsqueeze(0))
     return class_masks
 
-
 def generate_class_mask(label, classes):
     label, classes = torch.broadcast_tensors(label,
                                              classes.unsqueeze(1).unsqueeze(2))
     class_mask = label.eq(classes).sum(0, keepdims=True)
     return class_mask
 
+def generate_intervals(width, num):
+
+    assert num > 1, "The mixed strip numbers should be lager than 1"
+    crop_length = int(width/num)
+    crop_list = []
+    for i in range(num):
+        if i < num-1:
+            crop_list.append((i*crop_length,(i+1)*crop_length))
+        else:
+            crop_list.append((i*crop_length, width))
+    crop_list = random.sample(crop_list, int(num/2))
+    return crop_list
+
+def zebra_masks(target_img, num):
+    shape = target_img.shape
+    batch_size, height, width = shape[0], shape[2], shape[3]
+    masks = []
+    for i in range(batch_size):
+        intervals = generate_intervals(width, num)
+        mask = torch.zeros((1,1,height, width), dtype=torch.uint8).cuda()
+        for intval in intervals:
+            mask[:,:,:,intval[0]:intval[1]] = 1
+        masks.append(mask)
+    return masks
+
+
+
+# def generate_interval(intval_list, crop_list, num):
+#     # test_list.pop(random.randrange(len(test_list)))
+#     intval = intval_list.pop(random.randrange(len(intval_list)))
+#     crop_start = random.randint(intval[0], intval[1])
+#     crop_end = random.randint(crop_start+1, intval[1])
+#     crop_list.append((crop_start, crop_end))
+#     if crop_start-1 > intval[0]:
+#         intval_s1 = (intval[0], crop_start-1)
+#         intval_list.append(intval_s1)
+#     if crop_end+1 < intval[1]:
+#         intval_s2 = (crop_end, intval[1])
+#         intval_list.append(intval_s2)
+#     if len(crop_list) < num:
+#         generate_interval(intval_list, crop_list, num)
+#     else:
+#         return crop_list
+    
+# def len_intval(intval):
+#     return (intval[1] - intval[0]) > 1
 
 def one_mix(mask, data=None, target=None):
     if mask is None:

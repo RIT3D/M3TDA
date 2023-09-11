@@ -35,8 +35,7 @@ from mmseg.models.uda.masking_consistency_module import \
     MaskingConsistencyModule
 from mmseg.models.uda.uda_decorator import UDADecorator, get_module
 from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
-                                                get_mean_std, strong_transform,
-                                                zebra_masks)
+                                                get_mean_std, strong_transform)
 from mmseg.models.utils.visualization import prepare_debug_out, subplotimg
 from mmseg.utils.utils import downscale_label_ratio
 
@@ -61,8 +60,6 @@ def calc_grad_magnitude(grads, norm_type=2.0):
 
     return norm
 
-def max_min(weights):
-    return weights.max(), weights.min()
 
 @UDA.register_module()
 class DACS(UDADecorator):
@@ -286,14 +283,22 @@ class DACS(UDADecorator):
                           pseudo_label, pseudo_weight,
                           strong_parameters,
                           seg_debug_mode):
-        
+        '''
+        img.shape [4,3,512,512]
+        gt_semantic_seg.shape [4,1,512,512]
+        gt_pixel_weight.shape [4,512,512]
+        trg_img.shape [4,3,512,512]
+        pseudo_label.shape [4,512,512]
+        pseudo_weight.shape [4,512,512]
+        '''
         batch_size = img.shape[0]
         mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
         mixed_seg_weight = pseudo_weight.clone()
+        # mix_masks is a list of 4 item.
+        # mix_masks[i].shape [1,1,512,512]
         mix_masks = get_class_masks(gt_semantic_seg)
 
         for i in range(batch_size):
-            strong_parameters['mix'] = mix_masks[i]
             strong_parameters['mix'] = mix_masks[i]
             mixed_img[i], mixed_lbl[i] = strong_transform(
                 strong_parameters,
@@ -322,43 +327,7 @@ class DACS(UDADecorator):
         else:
             return mix_losses, debug_output, \
                 (None, None, None, None)
-        
-    def mix_targets(self,   
-                    target_img, img_metas,
-                    pseudo_label, pseudo_weight,
-                    target2_img,
-                    pseudo2_label, pseudo2_weight,
-                    strong_parameters):
-        batch_size = target_img.shape[0]
-        mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
-        mixed_seg_weight = pseudo_weight.clone()
-        mix_masks = zebra_masks(target_img, num=4)
-
-        for i in range(batch_size):
-            strong_parameters['mix'] = mix_masks[i]
-            mixed_img[i], mixed_lbl[i] = strong_transform(
-                strong_parameters,
-                data=torch.stack((target_img[i], target2_img[i])),
-                target=torch.stack((pseudo_label[i], pseudo2_label[i]))
-            )
-            _, mixed_seg_weight[i] = strong_transform(
-                strong_parameters,
-                target=torch.stack((pseudo_weight[i], pseudo2_weight[i]))
-            )
-        mixed_img = torch.cat(mixed_img)
-        mixed_lbl = torch.cat(mixed_lbl)
-        mix_losses = self.get_model().forward_train(
-            mixed_img, img_metas,
-            mixed_lbl,
-            seg_weight=mixed_seg_weight,
-            return_feat=False,
-        )
-        debug_output = self.get_model().debug_output
-
-        return mix_losses, mixed_img, mixed_lbl.squeeze(), mixed_seg_weight,\
-            debug_output, mix_masks
-
-        
+    
     def mask_training(self,
                       img, img_metas,
                       gt_semantic_seg,
@@ -551,21 +520,6 @@ class DACS(UDADecorator):
             mixs2_loss, mixs2_log_vars = self._parse_losses(mixs2_losses)
             log_vars.update(mixs2_log_vars)
             mixs2_loss.backward()
-
-            # Train on the mixed target1 and target2
-            mix12_losses, mix12_img, mix12_lbl,mix12_seg_weight, \
-            debug_output, mix12_masks = self.mix_targets(
-                target_img, img_metas,
-                pseudo_label, pseudo_weight,
-                target2_img,
-                pseudo2_label, pseudo2_weight,
-                strong_parameters
-            )
-            seg_debug['Mix12'] = debug_output
-            mix12_losses = add_prefix(mix12_losses, 'mix12')
-            mix12_loss, mix12_log_vars = self._parse_losses(mix12_losses)
-            log_vars.update(mix12_log_vars)
-            mix12_loss.backward()
             
             if self.enable_masking and self.mask_mode.startswith('separate'):
                 # Train on the masked image (here only mask on target1 image - Masked1)
@@ -603,46 +557,17 @@ class DACS(UDADecorator):
                 maskeds2_loss, masked2_log_vars = self._parse_losses(maskeds2_loss)
                 log_vars.update(masked2_log_vars)
                 maskeds2_loss.backward()
-                # Train on the masked image (here only mask on Mix12 image - Masked12)
-                masked12_loss, mic_debug_output = self.mask_training(
-                    img, img_metas,
-                    gt_semantic_seg,
-                    mix12_img, target_img_metas,
-                    valid_pseudo_mask,
-                    mix12_lbl, mix12_seg_weight
-                )
-                if seg_debug_mode:
-                    seg_debug['Masked12'] = mic_debug_output['Masked']
-                masked12_loss = add_prefix(masked12_loss, 'masked12')
-                masked12_loss, masked12_log_vars = self._parse_losses(masked12_loss)
-                log_vars.update(masked12_log_vars)
-                masked12_loss.backward()
 
             if seg_debug_mode:
-                
-                def prepare_debug_out(out, mean=means, std=stds):
-                    if len(out.shape) == 4 and out.shape[0] == 1:
-                        out = out[0]
-                    if len(out.shape) == 2:
-                        out = np.expand_dims(out, 0)
-                    assert len(out.shape) == 3
-                    if out.shape[0] == 3:
-                        if mean is not None:
-                            out = torch.clamp(denorm(out, mean, std), 0, 1)[0]
-                    elif out.shape[0] > 3:
-                        out = torch.softmax(torch.from_numpy(out), dim=0).numpy()
-                        out = np.argmax(out, axis=0)
-                        
-                    elif out.shape[0] == 1:
-                        out = out[0]
-                    else:
-                        raise NotImplementedError(out.shape)
-                    return out
-                
                 out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
                 os.makedirs(out_dir, exist_ok=True)
+                vis_img = torch.clamp(denorm(img, means, stds), 0, 1)
+                vis_trg1_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
+                vis_trg2_img = torch.clamp(denorm(target2_img, means, stds), 0, 1)
+                vis_mixs1_img = torch.clamp(denorm(mixs1_debug_content[0], means, stds), 0, 1)
+                vis_mixs2_img = torch.clamp(denorm(mixs2_debug_content[0], means, stds), 0, 1)
                 for j in range(batch_size):
-                    rows, cols = 5, 9
+                    rows, cols = 4, 4
                     fig, axs = plt.subplots(
                         rows, 
                         cols,
@@ -656,65 +581,77 @@ class DACS(UDADecorator):
                             'left': 0        
                         },
                     )
-                    # Source torch.clamp(denorm(img, means, stds), 0, 1)
-                    subplotimg(axs[0][0], prepare_debug_out(seg_debug['Source']['Image'][j]), 'S Img')
-                    subplotimg(axs[1][0], prepare_debug_out(seg_debug['Source']['Seg. GT'][j]), 'S Seg GT', cmap='cityscapes')
-                    subplotimg(axs[2][0], prepare_debug_out(seg_debug['Source']['Seg. Pred.'][j]), 'S Pred', cmap='cityscapes')
-                    # Target 1
-                    subplotimg(axs[0][1], prepare_debug_out(seg_debug['Target1']['Image'][j]), 'T1 Img')
-                    subplotimg(axs[2][1], prepare_debug_out(seg_debug['Target1']['Pred'][j]), 'T1 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(pseudo_weight[j])
-                    subplotimg(axs[3][1], pseudo_weight[j], 'T1 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
-                    # Target 2
-                    subplotimg(axs[0][2], prepare_debug_out(seg_debug['Target2']['Image'][j]), 'T2 Img')
-                    subplotimg(axs[2][2], prepare_debug_out(seg_debug['Target2']['Pred'][j]), 'T2 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(pseudo2_weight[j])
-                    subplotimg(axs[3][2], pseudo2_weight[j], 'T2 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
+                    subplotimg(axs[0][0], vis_img[j], 'source Image')
+                    subplotimg(axs[1][0], vis_trg1_img[j], 'Target1 Image')
+                    subplotimg(axs[2][0], vis_trg2_img[j], 'Target2 Image')
+                    subplotimg(axs[0][1], gt_semantic_seg[j],
+                              'Source Seg GT',cmap='cityscapes')
+                    subplotimg(axs[1][1], pseudo_label[j],
+                               'Target1 Seg (Pseudo) GT', cmap='cityscapes')
+                    subplotimg(axs[2][1], pseudo2_label[j],
+                               'Target2 Seg (Pseudo) GT', cmap='cityscapes')
                     # MixS1
-                    subplotimg(axs[0][3], prepare_debug_out(seg_debug['MixS1']['Image'][j]), 'MixS1 Img')
-                    subplotimg(axs[1][3], prepare_debug_out(seg_debug['MixS1']['Seg. GT'][j]), 'MixS1 GT', cmap='cityscapes')
-                    subplotimg(axs[2][3], prepare_debug_out(seg_debug['MixS1']['Seg. Pred.'][j]), 'MixS1 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(mixs1_debug_content[3][j])
-                    subplotimg(axs[3][3], mixs1_debug_content[3][j], 'MixS1 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
-                    subplotimg(axs[4][3], mixs1_debug_content[2][j][0], 'MixS1 Domain Mask', cmap='gray')
+                    subplotimg(axs[0][2], vis_mixs1_img[j], 
+                               'MixS1 Image')
+                    subplotimg(axs[1][2], mixs1_debug_content[2][j][0], 
+                               'Domain Mask (MixS1)', cmap='gray')
+                    subplotimg(axs[0][3], mixs1_debug_content[3][j],
+                               'Pseudo W. (MixS1)', vmin=0, vmax=1)
+                    if mixs1_debug_content[1] is not None:
+                        subplotimg(axs[1][3], mixs1_debug_content[1][j], 
+                                   'MixS1 Label', cmap='cityscapes')
                     # MixS2
-                    
-                    subplotimg(axs[0][4], prepare_debug_out(seg_debug['MixS2']['Image'][j]), 'MixS2 Img')
-                    subplotimg(axs[1][4], prepare_debug_out(seg_debug['MixS2']['Seg. GT'][j]), 'MixS2 GT', cmap='cityscapes')
-                    subplotimg(axs[2][4], prepare_debug_out(seg_debug['MixS2']['Seg. Pred.'][j]), 'MixS2 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(mixs2_debug_content[3][j])
-                    subplotimg(axs[3][4], mixs2_debug_content[3][j], 'MixS2 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
-                    subplotimg(axs[4][4], mixs2_debug_content[2][j][0], 'MixS2 Domain Mask', cmap='gray')   
-                    # Mix12
-                    subplotimg(axs[0][5], prepare_debug_out(seg_debug['Mix12']['Image'][j]), 'Mix12 Img')
-                    subplotimg(axs[1][5], prepare_debug_out(seg_debug['Mix12']['Seg. GT'][j]), 'Mix12 GT', cmap='cityscapes')
-                    subplotimg(axs[2][5], prepare_debug_out(seg_debug['Mix12']['Seg. Pred.'][j]), 'Mix12 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(mix12_seg_weight[j])
-                    subplotimg(axs[3][5], mix12_seg_weight[j], 'Mix12 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
-                    subplotimg(axs[4][5], mix12_masks[j][0], 'Mix12 Domain Mask', cmap='gray')   
-                    # Masked1
-                    subplotimg(axs[0][6], prepare_debug_out(seg_debug['Masked1']['Image'][j]), 'Masked1 Img')
-                    subplotimg(axs[1][6], prepare_debug_out(seg_debug['Masked1']['Seg. GT'][j]), 'Masked1 GT', cmap='cityscapes')
-                    subplotimg(axs[2][6], prepare_debug_out(seg_debug['Masked1']['Seg. Pred.'][j]), 'Masked1 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(seg_debug['Masked1']['PL Weight'][j])
-                    subplotimg(axs[3][6], seg_debug['Masked1']['PL Weight'][j], 'Masked1 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0,vmax=1)
-                    # Masked2
-                    subplotimg(axs[0][7], prepare_debug_out(seg_debug['Masked2']['Image'][j]), 'Masked2 Img')
-                    subplotimg(axs[1][7], prepare_debug_out(seg_debug['Masked2']['Seg. GT'][j]), 'Masked2 GT', cmap='cityscapes')
-                    subplotimg(axs[2][7], prepare_debug_out(seg_debug['Masked2']['Seg. Pred.'][j]), 'Masked2 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(seg_debug['Masked2']['PL Weight'][j])
-                    subplotimg(axs[3][7], seg_debug['Masked2']['PL Weight'][j], 'Masked2 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0,vmax=1)
-                    # Masked12
-                    subplotimg(axs[0][8], prepare_debug_out(seg_debug['Masked12']['Image'][j]), 'Masked12 Img')
-                    subplotimg(axs[1][8], prepare_debug_out(seg_debug['Masked12']['Seg. GT'][j]), 'Masked12 GT', cmap='cityscapes')
-                    subplotimg(axs[2][8], prepare_debug_out(seg_debug['Masked12']['Seg. Pred.'][j]), 'Masked12 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(seg_debug['Masked12']['PL Weight'][j])
-                    subplotimg(axs[3][8], seg_debug['Masked12']['PL Weight'][j], 'Masked12 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0,vmax=1)
+                    subplotimg(axs[2][2], vis_mixs2_img[j], 
+                               'MixS2 Image')
+                    subplotimg(axs[3][2], mixs2_debug_content[2][j][0], 
+                               'Domain Mask (MixS2)', cmap='gray')
+                    subplotimg(axs[2][3], mixs2_debug_content[3][j],
+                               'Pseudo W. (MixS2)', vmin=0, vmax=1)
+                    if mixs2_debug_content[1] is not None:
+                        subplotimg(axs[3][3], mixs2_debug_content[1][j], 
+                                   'MixS2 Label', cmap='cityscapes')
                     for ax in axs.flat:
                             ax.axis('off')
                     plt.savefig(os.path.join(out_dir,
                                 f'{(self.local_iter + 1):06d}_{j}.png'))
                     plt.close()
+
+                out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
+                os.makedirs(out_dir, exist_ok=True)
+                if seg_debug['Source'] is not None and seg_debug:
+                    if 'Target1' in seg_debug:
+                        seg_debug['Target1']['Pseudo W.'] = mixs1_debug_content[3].cpu().numpy()
+                    if 'Target2' in seg_debug:
+                        seg_debug['Target2']['Pseudo W.'] = mixs2_debug_content[3].cpu().numpy()
+                    for j in range(batch_size):
+                        cols = len(seg_debug)
+                        rows = max(len(seg_debug[k]) for k in seg_debug.keys())
+                        fig, axs = plt.subplots(
+                            rows,
+                            cols,
+                            figsize=(5 * cols, 5 * rows),
+                            gridspec_kw={
+                                'hspace': 0.1,
+                                'wspace': 0,
+                                'top': 0.95,
+                                'bottom': 0,
+                                'right': 1,
+                                'left': 0
+                            },
+                            squeeze=False,
+                        )
+                        for k1, (n1, outs) in enumerate(seg_debug.items()):
+                            for k2, (n2, out) in enumerate(outs.items()):
+                                subplotimg(
+                                    axs[k2][k1],
+                                    **prepare_debug_out(f'{n1} {n2}', out[j],
+                                                        means, stds))
+                        for ax in axs.flat:
+                            ax.axis('off')
+                        plt.savefig(
+                            os.path.join(out_dir,
+                                        f'{(self.local_iter + 1):06d}_{j}_s.png'))
+                        plt.close()
             del seg_debug
         self.local_iter += 1
         return log_vars
