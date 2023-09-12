@@ -298,7 +298,7 @@ def generate_experiment_cfgs(id):
         # Setup runner
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
-            by_epoch=False, interval=iters, max_keep_ckpts=1)
+            by_epoch=False, interval=iters // 10, max_keep_ckpts=1)
         cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
 
         # Construct config name
