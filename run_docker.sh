@@ -21,7 +21,7 @@ docker run -it \
         --gpus all \
         -v /tmp/.X11-unix:/tmp/.X11-unix \
         -v /data:/data \
-        -v /home/dhe/M3TDA:/workspace \
+        -v /home/dhe/M3TDA_0912:/workspace \
         --privileged \
         --network=host \
         --ipc=host \
