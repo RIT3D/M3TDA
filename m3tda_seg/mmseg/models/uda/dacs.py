@@ -294,7 +294,6 @@ class DACS(UDADecorator):
 
         for i in range(batch_size):
             strong_parameters['mix'] = mix_masks[i]
-            strong_parameters['mix'] = mix_masks[i]
             mixed_img[i], mixed_lbl[i] = strong_transform(
                 strong_parameters,
                 data=torch.stack((img[i], trg_img[i])),
@@ -411,7 +410,8 @@ class DACS(UDADecorator):
                       target2_img,
                       target2_img_metas,
                       rare_class=None,
-                      valid_pseudo_mask=None):
+                      valid_pseudo_mask=None
+        ):
         """Forward function for training.
 
         Args:
@@ -502,7 +502,7 @@ class DACS(UDADecorator):
                     m.training = False
                 if isinstance(m, DropPath):
                     m.training = False
-            # Get target1 pseudo label
+            # Get target1 pseudo label ------------------------------------------------------
             pseudo_label, pseudo_weight, debug_output = self.predict_pseudo_label_and_weight(
                 target_img, target_img_metas, 
                 valid_pseudo_mask
@@ -510,7 +510,7 @@ class DACS(UDADecorator):
             # Debug target1 seg. output
             seg_debug['Target1'] = debug_output
 
-            # Get target2 pseudo label
+            # Get target2 pseudo label ------------------------------------------------------
             pseudo2_label, pseudo2_weight, debug_output = self.predict_pseudo_label_and_weight(
                 target2_img, target2_img_metas, 
                 valid_pseudo_mask
@@ -520,7 +520,7 @@ class DACS(UDADecorator):
             
             gt_pixel_weight = torch.ones((pseudo_weight.shape), device=dev)
 
-            # Train on the mixed target 1 and source (MixS1) image
+            # Train on the mixed target 1 and source (MixS1) image --------------------------
             mixs1_losses, debug_output, mixs1_debug_content = self.mix_source_target(
                 img, img_metas,
                 gt_semantic_seg, gt_pixel_weight,
@@ -536,7 +536,7 @@ class DACS(UDADecorator):
             log_vars.update(mixs1_log_vars)
             mixs1_loss.backward(retain_graph=True)
 
-            # Train on the mixed target 2 and source (MixS2) image
+            # Train on the mixed target 2 and source (MixS2) image --------------------------
             mixs2_losses, debug_output, mixs2_debug_content = self.mix_source_target(
                 img, img_metas,
                 gt_semantic_seg, gt_pixel_weight,
@@ -552,7 +552,7 @@ class DACS(UDADecorator):
             log_vars.update(mixs2_log_vars)
             mixs2_loss.backward()
 
-            # Train on the mixed target1 and target2
+            # Train on the mixed target1 and target2 -----------------------------------------
             mix12_losses, mix12_img, mix12_lbl,mix12_seg_weight, \
             debug_output, mix12_masks = self.mix_targets(
                 target_img, img_metas,
@@ -568,7 +568,7 @@ class DACS(UDADecorator):
             mix12_loss.backward()
             
             if self.enable_masking and self.mask_mode.startswith('separate'):
-                # Train on the masked image (here only mask on target1 image - Masked1)
+                # Train on the masked image (here only mask on target1 image - Masked1) --------
                 maskeds1_loss, mic_debug_output = self.mask_training(
                     img, img_metas,
                     gt_semantic_seg,
@@ -586,7 +586,7 @@ class DACS(UDADecorator):
                 maskeds1_loss, masked1_log_vars = self._parse_losses(maskeds1_loss)
                 log_vars.update(masked1_log_vars)
                 maskeds1_loss.backward()
-                # Train on the masked image (here only mask on target2 image - Masked2)
+                # Train on the masked image (here only mask on target2 image - Masked2) --------
                 maskeds2_loss, mic_debug_output = self.mask_training(
                     img, img_metas,
                     gt_semantic_seg,
@@ -603,7 +603,7 @@ class DACS(UDADecorator):
                 maskeds2_loss, masked2_log_vars = self._parse_losses(maskeds2_loss)
                 log_vars.update(masked2_log_vars)
                 maskeds2_loss.backward()
-                # Train on the masked image (here only mask on Mix12 image - Masked12)
+                # Train on the masked image (here only mask on Mix12 image - Masked12)---------
                 masked12_loss, mic_debug_output = self.mask_training(
                     img, img_metas,
                     gt_semantic_seg,
