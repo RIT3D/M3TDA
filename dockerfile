@@ -7,8 +7,8 @@ RUN echo "M3TDA Enviorments"
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # copy files
-RUN mkdir -p /backup
-COPY ./ /backup
+RUN mkdir -p /run
+COPY ./ /run
 
 # Install denpendies
 RUN rm /etc/apt/sources.list.d/cuda.list
@@ -17,7 +17,7 @@ RUN apt-get update
 RUN apt-get install -y libglib2.0-0 libgl1-mesa-dev
 
 # Segmentation
-RUN pip install -r /backup/requirements.txt
+RUN pip install -r /run/requirements.txt
 RUN pip install mmcv-full==1.3.7
 
 # # Detection

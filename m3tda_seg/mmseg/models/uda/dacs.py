@@ -290,7 +290,7 @@ class DACS(UDADecorator):
         batch_size = img.shape[0]
         mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
         mixed_seg_weight = pseudo_weight.clone()
-        mix_masks = get_class_masks(gt_semantic_seg)
+        mix_masks = get_class_masks(gt_semantic_seg) # classmix
 
         for i in range(batch_size):
             strong_parameters['mix'] = mix_masks[i]
