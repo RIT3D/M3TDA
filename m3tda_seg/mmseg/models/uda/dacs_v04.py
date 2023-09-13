@@ -108,6 +108,7 @@ class DACS(UDADecorator):
     def __init__(self, **cfg):
         super(DACS, self).__init__(**cfg)
         self.local_iter = 0
+        self.cfg = cfg
         self.max_iters = cfg['max_iters']
         self.source_only = cfg['source_only']
         self.alpha = cfg['alpha']
@@ -480,6 +481,7 @@ class DACS(UDADecorator):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+        
         log_vars = {}
         batch_size = img.shape[0]
         dev = img.device
@@ -607,41 +609,38 @@ class DACS(UDADecorator):
 
             # Image-level domain interpolation for multiple target domain ----------------------------------------
             target12_img, target21_img = image_domain_interploation(target_img, target2_img, means, stds)
-            
-            # def labtrans_targets(self,
-            #                      target_img, img_metas,
-            #                      pseudo_label, pseudo_weight):
-            consis1_loss, debug_output = self.labtrans_targets(target12_img, img_metas, 
-                                                               pseudo_label, pseudo_weight)
-            seg_debug['Target12'] = debug_output
-            consis1_loss = add_prefix(consis1_loss, 'target12')
-            consis1_loss, consis1_log_vars = self._parse_losses(consis1_loss)
-            log_vars.update(consis1_log_vars)
-            # clean_loss.backward(retain_graph=self.enable_fdist)
-            consis1_loss.backward()
+            # print(self.cfg['region_consis'], self.cfg['region_masking'], self.cfg['image_consis'], self.cfg['image_masking'])
+            if self.cfg['image_consis']:
+                consis1_loss, debug_output = self.labtrans_targets(target12_img, img_metas, 
+                                                                pseudo_label, pseudo_weight)
+                seg_debug['Target12'] = debug_output
+                consis1_loss = add_prefix(consis1_loss, 'target12')
+                consis1_loss, consis1_log_vars = self._parse_losses(consis1_loss)
+                log_vars.update(consis1_log_vars)
+                consis1_loss.backward()
 
-            consis2_loss, debug_output = self.labtrans_targets(target21_img, img_metas, pseudo2_label, pseudo2_weight)
-            seg_debug['Target21'] = debug_output
-            consis2_loss = add_prefix(consis2_loss, 'target21')
-            consis2_loss, consis2_log_vars = self._parse_losses(consis2_loss)
-            log_vars.update(consis2_log_vars)
-            # clean_loss.backward(retain_graph=self.enable_fdist)
-            consis2_loss.backward()
+                consis2_loss, debug_output = self.labtrans_targets(target21_img, img_metas, pseudo2_label, pseudo2_weight)
+                seg_debug['Target21'] = debug_output
+                consis2_loss = add_prefix(consis2_loss, 'target21')
+                consis2_loss, consis2_log_vars = self._parse_losses(consis2_loss)
+                log_vars.update(consis2_log_vars)
+                consis2_loss.backward()
 
-            # Train on the region-level mixed target1 and target2 (Mix12)-----------------------------------------
-            mix12_losses, mix12_img, mix12_lbl, mix12_seg_weight, \
-            debug_output, mix12_masks = self.cutmix_targets(
-                target_img, img_metas,
-                pseudo_label, pseudo_weight,
-                target2_img,
-                pseudo2_label, pseudo2_weight,
-                strong_parameters
-            )
-            seg_debug['Mix12'] = debug_output
-            mix12_losses = add_prefix(mix12_losses, 'mix12')
-            mix12_loss, mix12_log_vars = self._parse_losses(mix12_losses)
-            log_vars.update(mix12_log_vars)
-            mix12_loss.backward()
+            # Region-level domain interpolation for target1 and target2 (Mix12)-----------------------------------------
+            if self.cfg['region_consis']:
+                mix12_losses, mix12_img, mix12_lbl, mix12_seg_weight, \
+                debug_output, mix12_masks = self.cutmix_targets(
+                    target_img, img_metas,
+                    pseudo_label, pseudo_weight,
+                    target2_img,
+                    pseudo2_label, pseudo2_weight,
+                    strong_parameters
+                )
+                seg_debug['Mix12'] = debug_output
+                mix12_losses = add_prefix(mix12_losses, 'mix12')
+                mix12_loss, mix12_log_vars = self._parse_losses(mix12_losses)
+                log_vars.update(mix12_log_vars)
+                mix12_loss.backward()
 
             if self.enable_masking and self.mask_mode.startswith('separate'):
                 # Train on the masked image (here only mask on target1 image - Masked1) --------
@@ -675,47 +674,49 @@ class DACS(UDADecorator):
                 log_vars.update(masked2_log_vars)
                 maskeds2_loss.backward()
                 # Train on the masked image (here only mask on Mix12 image - Masked12)---------
-                masked12_loss, mic_debug_output = self.mask_training(
-                    img, img_metas,
-                    gt_semantic_seg,
-                    mix12_img, target_img_metas,
-                    valid_pseudo_mask,
-                    mix12_lbl, mix12_seg_weight
-                )
-                if seg_debug_mode:
-                    seg_debug['Masked12'] = mic_debug_output['Masked']
-                masked12_loss = add_prefix(masked12_loss, 'masked12')
-                masked12_loss, masked12_log_vars = self._parse_losses(masked12_loss)
-                log_vars.update(masked12_log_vars)
-                masked12_loss.backward()
+                if self.cfg['region_masking']:
+                    masked12_loss, mic_debug_output = self.mask_training(
+                        img, img_metas,
+                        gt_semantic_seg,
+                        mix12_img, target_img_metas,
+                        valid_pseudo_mask,
+                        mix12_lbl, mix12_seg_weight
+                    )
+                    if seg_debug_mode:
+                        seg_debug['Masked12'] = mic_debug_output['Masked']
+                    masked12_loss = add_prefix(masked12_loss, 'masked12')
+                    masked12_loss, masked12_log_vars = self._parse_losses(masked12_loss)
+                    log_vars.update(masked12_log_vars)
+                    masked12_loss.backward()
                 # Train on the masked image (here only mask on Target12 image - MasekedTrg12) ---
-                maskedTrg12_loss, mic_debug_output = self.mask_training(
-                    img, img_metas,
-                    gt_semantic_seg,
-                    target12_img, target_img_metas,
-                    valid_pseudo_mask,
-                    pseudo_label, pseudo_weight
-                )
-                if seg_debug_mode:
-                    seg_debug['MaskedTrg12'] = mic_debug_output['Masked']
-                maskedTrg12_loss = add_prefix(maskedTrg12_loss, 'maskedtrg12')
-                maskedTrg12_loss, maskedTrg12_log_vars = self._parse_losses(maskedTrg12_loss)
-                log_vars.update(maskedTrg12_log_vars)
-                maskedTrg12_loss.backward()
-                # Train on the masked image (here only mask on Target21 image - MasekedTrg21) ---
-                maskedTrg21_loss, mic_debug_output = self.mask_training(
-                    img, img_metas,
-                    gt_semantic_seg,
-                    target21_img, target_img_metas,
-                    valid_pseudo_mask,
-                    pseudo2_label,pseudo2_weight
-                )
-                if seg_debug_mode:
-                    seg_debug['MaskedTrg21'] = mic_debug_output['Masked']
-                maskedTrg21_loss = add_prefix(maskedTrg21_loss, 'maskedtrg21')
-                maskedTrg21_loss, maskedTrg21_log_vars = self._parse_losses(maskedTrg21_loss)
-                log_vars.update(maskedTrg21_log_vars)
-                maskedTrg21_loss.backward()
+                if self.cfg['image_masking']:
+                    maskedTrg12_loss, mic_debug_output = self.mask_training(
+                        img, img_metas,
+                        gt_semantic_seg,
+                        target12_img, target_img_metas,
+                        valid_pseudo_mask,
+                        pseudo_label, pseudo_weight
+                    )
+                    if seg_debug_mode:
+                        seg_debug['MaskedTrg12'] = mic_debug_output['Masked']
+                    maskedTrg12_loss = add_prefix(maskedTrg12_loss, 'maskedtrg12')
+                    maskedTrg12_loss, maskedTrg12_log_vars = self._parse_losses(maskedTrg12_loss)
+                    log_vars.update(maskedTrg12_log_vars)
+                    maskedTrg12_loss.backward()
+                    # Train on the masked image (here only mask on Target21 image - MasekedTrg21) ---
+                    maskedTrg21_loss, mic_debug_output = self.mask_training(
+                        img, img_metas,
+                        gt_semantic_seg,
+                        target21_img, target_img_metas,
+                        valid_pseudo_mask,
+                        pseudo2_label,pseudo2_weight
+                    )
+                    if seg_debug_mode:
+                        seg_debug['MaskedTrg21'] = mic_debug_output['Masked']
+                    maskedTrg21_loss = add_prefix(maskedTrg21_loss, 'maskedtrg21')
+                    maskedTrg21_loss, maskedTrg21_log_vars = self._parse_losses(maskedTrg21_loss)
+                    log_vars.update(maskedTrg21_log_vars)
+                    maskedTrg21_loss.backward()
 
             if seg_debug_mode:
                 def prepare_debug_out(out, mean=means, std=stds):
@@ -740,7 +741,7 @@ class DACS(UDADecorator):
                 out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
                 os.makedirs(out_dir, exist_ok=True)
                 for j in range(batch_size):
-                    rows, cols = 5, 11
+                    rows, cols = 5, 13
                     fig, axs = plt.subplots(
                         rows, 
                         cols,
@@ -776,7 +777,6 @@ class DACS(UDADecorator):
                     subplotimg(axs[3][3], mixs1_debug_content[3][j], 'MixS1 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
                     subplotimg(axs[4][3], mixs1_debug_content[2][j][0], 'MixS1 Domain Mask', cmap='gray')
                     # MixS2
-                    
                     subplotimg(axs[0][4], prepare_debug_out(seg_debug['MixS2']['Image'][j]), 'MixS2 Img')
                     subplotimg(axs[1][4], prepare_debug_out(seg_debug['MixS2']['Seg. GT'][j]), 'MixS2 GT', cmap='cityscapes')
                     subplotimg(axs[2][4], prepare_debug_out(seg_debug['MixS2']['Seg. Pred.'][j]), 'MixS2 Pred', cmap='cityscapes')
@@ -784,12 +784,13 @@ class DACS(UDADecorator):
                     subplotimg(axs[3][4], mixs2_debug_content[3][j], 'MixS2 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
                     subplotimg(axs[4][4], mixs2_debug_content[2][j][0], 'MixS2 Domain Mask', cmap='gray')   
                     # Mix12
-                    subplotimg(axs[0][5], prepare_debug_out(seg_debug['Mix12']['Image'][j]), 'Mix12 Img')
-                    subplotimg(axs[1][5], prepare_debug_out(seg_debug['Mix12']['Seg. GT'][j]), 'Mix12 GT', cmap='cityscapes')
-                    subplotimg(axs[2][5], prepare_debug_out(seg_debug['Mix12']['Seg. Pred.'][j]), 'Mix12 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(mix12_seg_weight[j])
-                    subplotimg(axs[3][5], mix12_seg_weight[j], 'Mix12 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
-                    subplotimg(axs[4][5], mix12_masks[j][0], 'Mix12 Domain Mask', cmap='gray')   
+                    if self.cfg['region_consis']:
+                        subplotimg(axs[0][5], prepare_debug_out(seg_debug['Mix12']['Image'][j]), 'Mix12 Img')
+                        subplotimg(axs[1][5], prepare_debug_out(seg_debug['Mix12']['Seg. GT'][j]), 'Mix12 GT', cmap='cityscapes')
+                        subplotimg(axs[2][5], prepare_debug_out(seg_debug['Mix12']['Seg. Pred.'][j]), 'Mix12 Pred', cmap='cityscapes')
+                        max_v, min_v = max_min(mix12_seg_weight[j])
+                        subplotimg(axs[3][5], mix12_seg_weight[j], 'Mix12 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0, vmax=1)
+                        subplotimg(axs[4][5], mix12_masks[j][0], 'Mix12 Domain Mask', cmap='gray')   
                     # Masked1
                     subplotimg(axs[0][6], prepare_debug_out(seg_debug['Masked1']['Image'][j]), 'Masked1 Img')
                     subplotimg(axs[1][6], prepare_debug_out(seg_debug['Masked1']['Seg. GT'][j]), 'Masked1 GT', cmap='cityscapes')
@@ -803,19 +804,30 @@ class DACS(UDADecorator):
                     max_v, min_v = max_min(seg_debug['Masked2']['PL Weight'][j])
                     subplotimg(axs[3][7], seg_debug['Masked2']['PL Weight'][j], 'Masked2 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0,vmax=1)
                     # Masked12
-                    subplotimg(axs[0][8], prepare_debug_out(seg_debug['Masked12']['Image'][j]), 'Masked12 Img')
-                    subplotimg(axs[1][8], prepare_debug_out(seg_debug['Masked12']['Seg. GT'][j]), 'Masked12 GT', cmap='cityscapes')
-                    subplotimg(axs[2][8], prepare_debug_out(seg_debug['Masked12']['Seg. Pred.'][j]), 'Masked12 Pred', cmap='cityscapes')
-                    max_v, min_v = max_min(seg_debug['Masked12']['PL Weight'][j])
-                    subplotimg(axs[3][8], seg_debug['Masked12']['PL Weight'][j], 'Masked12 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0,vmax=1)
-                    # Target 12
-                    subplotimg(axs[0][9], prepare_debug_out(seg_debug['Target12']['Image'][j]), 'Target12 Img')
-                    subplotimg(axs[1][9], prepare_debug_out(seg_debug['Target12']['Seg. GT'][j]), 'Target12 GT', cmap='cityscapes')
-                    subplotimg(axs[2][9], prepare_debug_out(seg_debug['Target12']['Seg. Pred.'][j]), 'Target12 Pred', cmap='cityscapes')
-                    # Target 21
-                    subplotimg(axs[0][10], prepare_debug_out(seg_debug['Target21']['Image'][j]), 'Target21 Img')
-                    subplotimg(axs[1][10], prepare_debug_out(seg_debug['Target21']['Seg. GT'][j]), 'Target21 GT', cmap='cityscapes')
-                    subplotimg(axs[2][10], prepare_debug_out(seg_debug['Target21']['Seg. Pred.'][j]), 'Target21 Pred', cmap='cityscapes')
+                    if self.cfg['region_masking']:
+                        subplotimg(axs[0][8], prepare_debug_out(seg_debug['Masked12']['Image'][j]), 'Masked12 Img')
+                        subplotimg(axs[1][8], prepare_debug_out(seg_debug['Masked12']['Seg. GT'][j]), 'Masked12 GT', cmap='cityscapes')
+                        subplotimg(axs[2][8], prepare_debug_out(seg_debug['Masked12']['Seg. Pred.'][j]), 'Masked12 Pred', cmap='cityscapes')
+                        max_v, min_v = max_min(seg_debug['Masked12']['PL Weight'][j])
+                        subplotimg(axs[3][8], seg_debug['Masked12']['PL Weight'][j], 'Masked12 W. Max{:.1e} Min{:.1e}'.format(max_v, min_v), vmin=0,vmax=1)
+                    if self.cfg['image_consis']:
+                        # Target12
+                        subplotimg(axs[0][9], prepare_debug_out(seg_debug['Target12']['Image'][j]), 'Target12 Img')
+                        subplotimg(axs[1][9], prepare_debug_out(seg_debug['Target12']['Seg. GT'][j]), 'Target12 GT', cmap='cityscapes')
+                        subplotimg(axs[2][9], prepare_debug_out(seg_debug['Target12']['Seg. Pred.'][j]), 'Target12 Pred', cmap='cityscapes')
+                        # Target21
+                        subplotimg(axs[0][10], prepare_debug_out(seg_debug['Target21']['Image'][j]), 'Target21 Img')
+                        subplotimg(axs[1][10], prepare_debug_out(seg_debug['Target21']['Seg. GT'][j]), 'Target21 GT', cmap='cityscapes')
+                        subplotimg(axs[2][10], prepare_debug_out(seg_debug['Target21']['Seg. Pred.'][j]), 'Target21 Pred', cmap='cityscapes')
+                    if self.cfg['image_masking']:
+                        # MaskedTrg12
+                        subplotimg(axs[0][11], prepare_debug_out(seg_debug['MaskedTrg12']['Image'][j]), 'MaskedTrg12 Img')
+                        subplotimg(axs[1][11], prepare_debug_out(seg_debug['MaskedTrg12']['Seg. GT'][j]), 'MaskedTrg12 GT', cmap='cityscapes')
+                        subplotimg(axs[2][11], prepare_debug_out(seg_debug['MaskedTrg12']['Seg. Pred.'][j]), 'MaskedTrg12 Pred', cmap='cityscapes')
+                        # MaskedTrg12
+                        subplotimg(axs[0][12], prepare_debug_out(seg_debug['MaskedTrg21']['Image'][j]), 'MaskedTrg21 Img')
+                        subplotimg(axs[1][12], prepare_debug_out(seg_debug['MaskedTrg21']['Seg. GT'][j]), 'MaskedTrg21 GT', cmap='cityscapes')
+                        subplotimg(axs[2][12], prepare_debug_out(seg_debug['MaskedTrg21']['Seg. Pred.'][j]), 'MaskedTrg21 Pred', cmap='cityscapes')
 
                     for ax in axs.flat:
                             ax.axis('off')

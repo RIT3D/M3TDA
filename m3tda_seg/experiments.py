@@ -127,6 +127,10 @@ def setup_rcs(cfg, temperature, min_crop_ratio):
         min_pixels=3000, class_temp=temperature, min_crop_ratio=min_crop_ratio)
     return cfg
 
+    region_consis = True
+    region_mix = True
+    image_consis = True
+    image_consis= True
 
 def generate_experiment_cfgs(id):
 
@@ -134,7 +138,7 @@ def generate_experiment_cfgs(id):
         cfg = {
             '_base_': ['_base_/default_runtime.py'],
             'gpu_model': gpu_model,
-            'n_gpus': n_gpus
+            'n_gpus': n_gpus,
         }
         if seed is not None:
             cfg['seed'] = seed
@@ -359,6 +363,10 @@ def generate_experiment_cfgs(id):
             .replace('cityscapes', 'cs') \
             .replace('synthia', 'syn') \
             .replace('darkzurich', 'dzur')
+        cfg['uda']['region_consis'] = region_consis
+        cfg['uda']['region_masking'] = region_masking
+        cfg['uda']['image_consis'] = image_consis
+        cfg['uda']['image_masking'] = image_masking
         return cfg
 
     # -------------------------------------------------------------------------
@@ -387,6 +395,13 @@ def generate_experiment_cfgs(id):
     mask_lambda = 1
     mask_block_size = None
     mask_ratio = 0
+    # options for ablation study in MTDA
+    region_consis = True
+    region_masking = True
+    image_consis = True
+    image_masking = True
+
+
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
     # -------------------------------------------------------------------------

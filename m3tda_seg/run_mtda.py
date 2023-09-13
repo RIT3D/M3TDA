@@ -52,6 +52,12 @@ if __name__ == '__main__':
         '--machine', type=str, choices=['local'], default='local')
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--startup-test', action='store_true')
+    # Ablation study
+    parser.add_argument('--region-consis', action='store_true')
+    parser.add_argument('--region-masking', action='store_true')
+    parser.add_argument('--image-consis', action='store_true')
+    parser.add_argument('--image-masking', action='store_true')
+
     args = parser.parse_args()
     assert (args.config is None) != (args.exp is None), \
         'Either config or exp has to be defined.'
@@ -112,6 +118,13 @@ if __name__ == '__main__':
             cfg['work_dir'] = os.path.join('work_dirs', exp_name, cfg['name'])
             cfg['git_rev'] = get_git_hash()
             cfg['_base_'] = ['../../' + e for e in cfg['_base_']]
+            # Ablation study choices
+            cfg['uda']['region_masking'] = args.region_masking
+            cfg['uda']['region_consis'] = args.region_consis
+            cfg['uda']['image_masking'] = args.image_masking
+            cfg['uda']['image_consis'] = args.image_consis
+
+
             cfg_out_file = f"{GEN_CONFIG_DIR}/{exp_name}/{cfg['name']}.py"
             os.makedirs(os.path.dirname(cfg_out_file), exist_ok=True)
             assert not os.path.isfile(cfg_out_file)
