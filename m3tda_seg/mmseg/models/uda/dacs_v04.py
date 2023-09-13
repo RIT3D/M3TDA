@@ -653,8 +653,6 @@ class DACS(UDADecorator):
                     pseudo_label, pseudo_weight
                 )
                 # Masked1 debug & log record
-                # mic_debug_output['Masked1'] = mic_debug_output.pop('Masked')
-                # seg_debug.update(mic_debug_output)
                 if seg_debug_mode:
                     seg_debug['Masked1'] = mic_debug_output['Masked']
                 maskeds1_loss = add_prefix(maskeds1_loss, 'masked1')
@@ -670,8 +668,6 @@ class DACS(UDADecorator):
                     pseudo2_label, pseudo2_weight,
                 )
                 # Masked2 debug & log record
-                # mic_debug_output['MaskedS2'] = mic_debug_output.pop('Masked')
-                # seg_debug.update(mic_debug_output)
                 if seg_debug_mode:
                     seg_debug['Masked2'] = mic_debug_output['Masked']
                 maskeds2_loss = add_prefix(maskeds2_loss, 'maskeds2')
@@ -692,9 +688,36 @@ class DACS(UDADecorator):
                 masked12_loss, masked12_log_vars = self._parse_losses(masked12_loss)
                 log_vars.update(masked12_log_vars)
                 masked12_loss.backward()
+                # Train on the masked image (here only mask on Target12 image - MasekedTrg12) ---
+                maskedTrg12_loss, mic_debug_output = self.mask_training(
+                    img, img_metas,
+                    gt_semantic_seg,
+                    target12_img, target_img_metas,
+                    valid_pseudo_mask,
+                    pseudo_label, pseudo_weight
+                )
+                if seg_debug_mode:
+                    seg_debug['MaskedTrg12'] = mic_debug_output['Masked']
+                maskedTrg12_loss = add_prefix(maskedTrg12_loss, 'maskedtrg12')
+                maskedTrg12_loss, maskedTrg12_log_vars = self._parse_losses(maskedTrg12_loss)
+                log_vars.update(maskedTrg12_log_vars)
+                maskedTrg12_loss.backward()
+                # Train on the masked image (here only mask on Target21 image - MasekedTrg21) ---
+                maskedTrg21_loss, mic_debug_output = self.mask_training(
+                    img, img_metas,
+                    gt_semantic_seg,
+                    target21_img, target_img_metas,
+                    valid_pseudo_mask,
+                    pseudo2_label,pseudo2_weight
+                )
+                if seg_debug_mode:
+                    seg_debug['MaskedTrg21'] = mic_debug_output['Masked']
+                maskedTrg21_loss = add_prefix(maskedTrg21_loss, 'maskedtrg21')
+                maskedTrg21_loss, maskedTrg21_log_vars = self._parse_losses(maskedTrg21_loss)
+                log_vars.update(maskedTrg21_log_vars)
+                maskedTrg21_loss.backward()
 
             if seg_debug_mode:
-                
                 def prepare_debug_out(out, mean=means, std=stds):
                     if len(out.shape) == 4 and out.shape[0] == 1:
                         out = out[0]
