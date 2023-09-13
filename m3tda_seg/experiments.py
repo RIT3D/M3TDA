@@ -11,7 +11,6 @@ import pdb
 
 # flake8: noqa
 
-
 def get_model_base(architecture, backbone):
     architecture = architecture.replace('sfa_', '')
     for j in range(1, 100):

@@ -398,8 +398,6 @@ class DACS(UDADecorator):
         if valid_pseudo_mask is not None:
             pseudo_weight *= valid_pseudo_mask.squeeze(1)
         return pseudo_weight
-    
-
 
     def forward_train(self,
                       img,
