@@ -123,7 +123,7 @@ def main():
 
     if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
         raise ValueError('The output file must be a pkl file.')
-
+    # import pdb; pdb.set_trace()
     cfg = mmcv.Config.fromfile(args.config)
     if args.options is not None:
         cfg.merge_from_dict(args.options)
@@ -180,64 +180,68 @@ def main():
 
     # build the dataloader
     # TODO: support multiple images per gpu (only minor changes are needed)
-    dataset = build_dataset(cfg.data.test)
-    data_loader = build_dataloader(
-        dataset,
-        samples_per_gpu=1,
-        workers_per_gpu=cfg.data.workers_per_gpu,
-        dist=distributed,
-        shuffle=False)
+    for test_name in [cfg.data.test, cfg.data.test2]:
+        # if test_name.type == 'CityscapesDataset':
+        #     continue
+        print('=======> ', test_name.type)
+        dataset = build_dataset(test_name)
+        data_loader = build_dataloader(
+            dataset,
+            samples_per_gpu=1,
+            workers_per_gpu=cfg.data.workers_per_gpu,
+            dist=distributed,
+            shuffle=False)
 
-    # build the model and load checkpoint
-    cfg.model.train_cfg = None
-    model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
-    fp16_cfg = cfg.get('fp16', None)
-    if fp16_cfg is not None:
-        wrap_fp16_model(model)
-    checkpoint = load_checkpoint(
-        model,
-        args.checkpoint,
-        map_location='cpu',
-        revise_keys=[(r'^module\.', ''), ('model.', '')])
-    if 'CLASSES' in checkpoint.get('meta', {}):
-        model.CLASSES = checkpoint['meta']['CLASSES']
-    else:
-        print('"CLASSES" not found in meta, use dataset.CLASSES instead')
-        model.CLASSES = dataset.CLASSES
-    if 'PALETTE' in checkpoint.get('meta', {}):
-        model.PALETTE = checkpoint['meta']['PALETTE']
-    else:
-        print('"PALETTE" not found in meta, use dataset.PALETTE instead')
-        model.PALETTE = dataset.PALETTE
+        # build the model and load checkpoint
+        cfg.model.train_cfg = None
+        model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
+        fp16_cfg = cfg.get('fp16', None)
+        if fp16_cfg is not None:
+            wrap_fp16_model(model)
+        checkpoint = load_checkpoint(
+            model,
+            args.checkpoint,
+            map_location='cpu',
+            revise_keys=[(r'^module\.', ''), ('model.', '')])
+        if 'CLASSES' in checkpoint.get('meta', {}):
+            model.CLASSES = checkpoint['meta']['CLASSES']
+        else:
+            print('"CLASSES" not found in meta, use dataset.CLASSES instead')
+            model.CLASSES = dataset.CLASSES
+        if 'PALETTE' in checkpoint.get('meta', {}):
+            model.PALETTE = checkpoint['meta']['PALETTE']
+        else:
+            print('"PALETTE" not found in meta, use dataset.PALETTE instead')
+            model.PALETTE = dataset.PALETTE
 
-    efficient_test = False
-    if args.eval_options is not None:
-        efficient_test = args.eval_options.get('efficient_test', False)
+        efficient_test = False
+        if args.eval_options is not None:
+            efficient_test = args.eval_options.get('efficient_test', False)
 
-    if not distributed:
-        model = MMDataParallel(model, device_ids=[0])
-        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir,
-                                  efficient_test, args.opacity)
-    else:
-        model = MMDistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False)
-        outputs = multi_gpu_test(model, data_loader, args.tmpdir,
-                                 args.gpu_collect, efficient_test)
+        if not distributed:
+            model = MMDataParallel(model, device_ids=[0])
+            outputs = single_gpu_test(model, data_loader, args.show, args.show_dir,
+                                    efficient_test, args.opacity)
+        else:
+            model = MMDistributedDataParallel(
+                model.cuda(),
+                device_ids=[torch.cuda.current_device()],
+                broadcast_buffers=False)
+            outputs = multi_gpu_test(model, data_loader, args.tmpdir,
+                                    args.gpu_collect, efficient_test)
 
-    rank, _ = get_dist_info()
-    if rank == 0:
-        if args.out:
-            print(f'\nwriting results to {args.out}')
-            mmcv.dump(outputs, args.out)
-        kwargs = {} if args.eval_options is None else args.eval_options
-        if args.format_only:
-            dataset.format_results(outputs, **kwargs)
-        if args.eval:
-            res = dataset.evaluate(outputs, args.eval, **kwargs)
-            print([k for k, v in res.items() if 'IoU' in k])
-            print([round(v * 100, 1) for k, v in res.items() if 'IoU' in k])
+        rank, _ = get_dist_info()
+        if rank == 0:
+            if args.out:
+                print(f'\nwriting results to {args.out}')
+                mmcv.dump(outputs, args.out)
+            kwargs = {} if args.eval_options is None else args.eval_options
+            if args.format_only:
+                dataset.format_results(outputs, **kwargs)
+            if args.eval:
+                res = dataset.evaluate(outputs, args.eval, **kwargs)
+                print([k for k, v in res.items() if 'IoU' in k])
+                print([round(v * 100, 1) for k, v in res.items() if 'IoU' in k])
 
 
 if __name__ == '__main__':
